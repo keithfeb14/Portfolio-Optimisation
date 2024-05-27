@@ -3,9 +3,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 import numpy as np 
 from scipy.optimize import minimize
+from fredapi import Fred
+import matplotlib.pyplot as plt 
 
 #Tickers in portfolio
-
 tickers = ['SPY', 'BND', 'GLD', 'QQQ', 'VTI']
 
 end_date = datetime.today()
@@ -16,7 +17,6 @@ print(start_date)
 
 
 #Download adjusted close price (which include dividends and stock splits)
-
 adj_close_df = pd.DataFrame()
 
 for ticker in tickers:
@@ -40,7 +40,6 @@ print(log_returns)
 
 
 #Calculate the covariance matrix using annualised log returns 
-
 cov_matrix = log_returns.cov()*252
 
 print(cov_matrix)
@@ -63,8 +62,6 @@ def sharpe_ratio(weights, log_returns, risk_free_rate, cov_matrix):
 
 
 #Define the risk free rate
-from fredapi import Fred
-
 fred = Fred(api_key='ff13d3aca000abd2734f8e45dff1472b')
 
 ten_year_tresury_rate = fred.get_series_latest_release('GS10') / 100
@@ -112,7 +109,7 @@ print(f"Sharpe ratio: {optimal_portfolio_sharpe_ratio:.4f}")
 
 
 #Display the portfolio as a plot
-import matplotlib.pyplot as plt 
+
 
 plt.figure(figsize=(10, 6))
 plt.bar(tickers, optimal_weights)
@@ -123,3 +120,54 @@ plt.title('Optimal Portfolio Weights')
 
 plt.show()
 
+
+#Incorporate Different Risk Models
+
+def calculate_var(returns, alpha=0.05):
+    """
+    Calculate the Value at Risk (VaR) at a specified confidence level
+    :param returns: array-like, portfolio returns
+    :param alpha: float, confidence level
+    :return: float, VaR value
+    """
+    if isinstance(returns, pd.DataFrame):
+        returns = returns.values.flatten()
+    sorted_returns = np.sort(returns)
+    index = int(alpha * len(sorted_returns))
+    var = -sorted_returns[index]
+    return var
+
+def calculate_cvar(returns, alpha=0.05):
+    """
+    Calculate the Conditional Value at Risk (CVaR) at a specified confidence level
+    :param returns: array-like, portfolio returns
+    :param alpha: float, confidence level
+    :return: float, CVaR value
+    """
+    if isinstance(returns, pd.DataFrame):
+        returns = returns.values.flatten()
+    sorted_returns = np.sort(returns)
+    index = int(alpha * len(sorted_returns))
+    cvar = -sorted_returns[:index].mean()
+    return cvar
+
+def negative_cvar(weights, log_returns, alpha=0.05):
+    """
+    Function to minimize (negative CVaR)
+    :param weights: array-like, portfolio weights
+    :param log_returns: DataFrame, log returns of assets
+    :param alpha: float, confidence level for CVaR
+    :return: float, negative CVaR of the portfolio
+    """
+    portfolio_returns = log_returns.dot(weights)
+    return -calculate_cvar(portfolio_returns, alpha)
+
+# Optimization settings
+result_cvar = minimize(negative_cvar, initial_weights, args=(log_returns, 0.05), method='SLSQP', bounds=bounds, constraints=constraints)
+optimal_weights_cvar = result_cvar.x
+
+optimal_portfolio_return_cvar = expected_return(optimal_weights_cvar, log_returns)
+optimal_portfolio_cvar = calculate_cvar(log_returns.dot(optimal_weights_cvar))
+
+print(f"Optimized Portfolio Return: {optimal_portfolio_return_cvar:.4f}")
+print(f"Optimized Portfolio CVaR: {optimal_portfolio_cvar:.4f}")
